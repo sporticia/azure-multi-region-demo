@@ -90,7 +90,7 @@ jobs:
       - name: Terraform Plan 🧩
         id: tf-plan
         run: |
-          terraform -chdir=${{ inputs.CONFIG_FOLDER_PATH }} plan -input=false -out=tf.plan -var-file=./tfvars/common.tfvars -var-file=./tfvars/${{ inputs.REGION }}.tfvars
+          terraform -chdir=${{ inputs.CONFIG_FOLDER_PATH }} plan -input=false -no-color -out=tf.plan -var-file=./tfvars/common.tfvars -var-file=./tfvars/${{ inputs.REGION }}.tfvars
         continue-on-error: false
 
       # Publish terraform plan as PR comment
@@ -100,7 +100,8 @@ jobs:
         uses: actions/github-script@v7
         if: (success() || failure()) && github.event_name == 'pull_request'
         env:
-          PLAN: $${{steps.tf-plan.outputs.stdout}}\n$${{steps.tf-plan.outputs.stderr}}
+          PLAN_STDOUT: "${{ steps.tf-plan.outputs.stdout }}"
+          PLAN_STDERR: "${{ steps.tf-plan.outputs.stderr }}"
         with:
           script: |
             // Retrieve existing bot comments for the PR
@@ -118,8 +119,14 @@ jobs:
 
             <details><summary>Show Plan</summary>
 
-            \`\`\`\n
-            ${process.env.PLAN}
+            #### stdout
+            \`\`\`
+            ${process.env.PLAN_STDOUT}
+            \`\`\`
+
+            #### stderr
+            \`\`\`
+            ${process.env.PLAN_STDERR}
             \`\`\`
 
             </details>
