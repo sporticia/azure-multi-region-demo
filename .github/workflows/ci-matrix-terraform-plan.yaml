@@ -100,7 +100,6 @@ jobs:
         uses: actions/github-script@v7
         if: (success() || failure()) && github.event_name == 'pull_request'
         env:
-          PLAN: $${{steps.tf-plan.outputs.stdout}} $${{steps.tf-plan.outputs.stderr}}
           PLAN_STDOUT: "${{ steps.tf-plan.outputs.stdout }}"
           PLAN_STDERR: "${{ steps.tf-plan.outputs.stderr }}"
         with:
