@@ -1,0 +1,74 @@
+name: matrix terraform apply
+
+on:
+  workflow_call:
+    inputs:
+      ENVIRONMENT:
+        description: The GitHub environment being deployed to
+        required: false
+        type: string
+      REGION:
+        description: Region to run job as (prefix only - e.g uks,neu)
+        type: string
+        required: true
+      CONFIG_FOLDER_PATH:
+        description: The base path of the Terraform config you are wanting to plan
+        type: string
+        required: true
+
+    secrets:
+      AZURE_CLIENT_ID:
+        description: Azure Client ID of the service principal
+        required: false
+      AZURE_CLIENT_SECRET:
+        description: Azure Client secret of the service principal
+        required: false
+      AZURE_TENANT_ID:
+        description: Azure Azure Tenant containing the service principal
+        required: false
+      AZURE_SUBSCRIPTION_ID:
+        description: Azure subscription where resources should be created
+        required: false
+
+permissions:
+  id-token: write # Required for fetching an OIDC token.
+  contents: read # Required for actions/checkout.
+  pull-requests: write # Required to post plan to PR comment.
+
+env:
+  ARM_USE_OIDC: true # Don't forget this or you get RBAC errors on things like storage!!
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  terraform-plan:
+    name: terraform-plan
+    environment: ${{ inputs.ENVIRONMENT }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Code checkout 🔄
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Azure Login ⌨️
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Install terraform
+      - name: Install Terraform 🛠️
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_wrapper: false
+
+      # Initalise terraform
+      - name: Terraform Init 🔧
+        run: terraform -chdir=${{ inputs.CONFIG_FOLDER_PATH }} init -backend-config=./backend/${{ inputs.REGION }}.cfg
+
+      # Apply terraform and deploy resources
+      - name: Terraform Apply
+        id: plan
+        run: |
+          terraform -chdir=${{ inputs.CONFIG_FOLDER_PATH }} apply -input=false -auto-approve -var-file=./tfvars/common.tfvars -var-file=./tfvars/${{ inputs.REGION }}.tfvars
+        continue-on-error: false

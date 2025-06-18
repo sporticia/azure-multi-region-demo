@@ -1,0 +1,144 @@
+name: matrix terraform plan
+
+on:
+  workflow_call:
+    inputs:
+      ENVIRONMENT:
+        description: The GitHub environment being deployed to
+        required: false
+        type: string
+      REGION:
+        description: Region to run job as (prefix only - e.g uks,neu)
+        type: string
+        required: true
+      CONFIG_FOLDER_PATH:
+        description: The base path of the Terraform config you are wanting to plan
+        type: string
+        required: true
+
+    secrets:
+      AZURE_CLIENT_ID:
+        description: Azure Client ID of the service principal
+        required: false
+      AZURE_CLIENT_SECRET:
+        description: Azure Client secret of the service principal
+        required: false
+      AZURE_TENANT_ID:
+        description: Azure Azure Tenant containing the service principal
+        required: false
+      AZURE_SUBSCRIPTION_ID:
+        description: Azure subscription where resources should be created
+        required: false
+
+permissions:
+  id-token: write # Required for fetching an OIDC token.
+  contents: read # Required for actions/checkout.
+  pull-requests: write # Required to post plan to PR comment.
+
+env:
+  ARM_USE_OIDC: true # Don't forget this or you get RBAC errors on things like storage!!
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  terraform-plan:
+    name: terraform-plan
+    environment: ${{ inputs.ENVIRONMENT }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Code checkout 🔄
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Azure Login ⌨️
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Terraform 🛠️
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          # This needs to be true to get stdout and std error from the tf-plan step
+          # https://github.com/marketplace/actions/hashicorp-setup-terraform#outputs
+          terraform_wrapper: true
+
+      - name: Terraform Init 🔧
+        run: terraform -chdir=${{ inputs.CONFIG_FOLDER_PATH }} init -backend-config=./backend/${{ inputs.REGION }}.cfg
+
+      # Validate terraform files
+      - name: Terraform Validate 🔍
+        run: terraform validate
+
+      # Check terraform files formatting
+      - name: Terraform Format Check 🎨
+        run: terraform fmt -check -recursive
+
+      # Static scan terraform code
+      - name: Checkov Code Scan 🕵🏻‍♂️
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf #v12.1347.0
+        id: checkov-scan
+        with:
+          directory: ${{ inputs.CONFIG_FOLDER_PATH }}
+          download_external_modules: true
+          hard_fail_on: HIGH,CRITICAL
+          output_format: cli
+          quiet: true
+        continue-on-error: false
+
+      # Run terraform plan
+      - name: Terraform Plan 🧩
+        id: tf-plan
+        run: |
+          terraform -chdir=${{ inputs.CONFIG_FOLDER_PATH }} plan -input=false -out=tf.plan -var-file=./tfvars/common.tfvars -var-file=./tfvars/${{ inputs.REGION }}.tfvars
+        continue-on-error: false
+
+      # Publish terraform plan as PR comment
+      - id: pr-comment
+        name: Post comment to Pull Request
+        continue-on-error: true
+        uses: actions/github-script@v7
+        if: (success() || failure()) && github.event_name == 'pull_request'
+        env:
+          PLAN: $${{steps.tf-plan.outputs.stdout}}\n$${{steps.tf-plan.outputs.stderr}}
+        with:
+          script: |
+            // Retrieve existing bot comments for the PR
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            })
+            const botComment = comments.find(comment => {
+              return comment.user.type === 'Bot' && comment.body.includes('Terraform Format and Style')
+            })
+
+            // Prepare format of the comment
+            const output = `#### Terraform Plan 📖 \`${{ steps.tf-plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`\n
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            // If we have a comment, update it, otherwise create a new one
+            if (botComment) {
+              github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: output
+              })
+            } else {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: output
+              })
+            }
