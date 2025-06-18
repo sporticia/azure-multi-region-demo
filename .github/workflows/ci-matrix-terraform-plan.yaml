@@ -90,7 +90,7 @@ jobs:
       - name: Terraform Plan 🧩
         id: tf-plan
         run: |
-          terraform -chdir=${{ inputs.CONFIG_FOLDER_PATH }} plan -input=false -out=tf.plan -var-file=./tfvars/common.tfvars -var-file=./tfvars/${{ inputs.REGION }}.tfvars
+          terraform -chdir=${{ inputs.CONFIG_FOLDER_PATH }} plan -input=false -no-color -out=tf.plan -var-file=./tfvars/common.tfvars -var-file=./tfvars/${{ inputs.REGION }}.tfvars
         continue-on-error: false
 
       # Publish terraform plan as PR comment
