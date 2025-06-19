@@ -1,6 +1,6 @@
 # uks resources
 
-#Location
+# Region/Location
 region        = "UK South"
 region_prefix = "uks"
 
