@@ -1,6 +1,6 @@
 # neu resources
 
-#Location
+# Region/Location
 region        = "North Europe"
 region_prefix = "neu"
 
